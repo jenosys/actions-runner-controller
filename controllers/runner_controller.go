@@ -307,6 +307,11 @@ func (r *RunnerReconciler) newPod(runner v1alpha1.Runner) (corev1.Pod, error) {
 		runnerImage = r.RunnerImage
 	}
 
+	workDir := runner.Spec.WorkDir
+	if workDir == "" {
+		workDir = "/runner/_work"
+	}
+
 	runnerImagePullPolicy := runner.Spec.ImagePullPolicy
 	if runnerImagePullPolicy == "" {
 		runnerImagePullPolicy = corev1.PullAlways
@@ -345,6 +350,10 @@ func (r *RunnerReconciler) newPod(runner v1alpha1.Runner) (corev1.Pod, error) {
 			Name:  "GITHUB_URL",
 			Value: r.GitHubClient.GithubBaseURL,
 		},
+		{
+			Name:  "RUNNER_WORKDIR",
+			Value: workDir,
+		},
 	}
 
 	env = append(env, runner.Spec.Env...)
@@ -382,30 +391,69 @@ func (r *RunnerReconciler) newPod(runner v1alpha1.Runner) (corev1.Pod, error) {
 					EmptyDir: &corev1.EmptyDirVolumeSource{},
 				},
 			},
+			{
+				Name: "externals",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{},
+				},
+			},
+			{
+				Name: "certs-client",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{},
+				},
+			},
 		}
 		pod.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{
 			{
 				Name:      "work",
-				MountPath: "/runner/_work",
+				MountPath: workDir,
+			},
+			{
+				Name:      "externals",
+				MountPath: "/runner/externals",
+			},
+			{
+				Name:      "certs-client",
+				MountPath: "/certs/client",
+				ReadOnly:  true,
 			},
 		}
-		pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env, corev1.EnvVar{
-			Name:  "DOCKER_HOST",
-			Value: "tcp://localhost:2375",
-		})
+		pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env, []corev1.EnvVar{
+			{
+				Name:  "DOCKER_HOST",
+				Value: "tcp://localhost:2376",
+			},
+			{
+				Name:  "DOCKER_TLS_VERIFY",
+				Value: "1",
+			},
+			{
+				Name:  "DOCKER_CERT_PATH",
+				Value: "/certs/client",
+			},
+		}...)
 		pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
 			Name:  "docker",
 			Image: r.DockerImage,
 			VolumeMounts: []corev1.VolumeMount{
 				{
 					Name:      "work",
-					MountPath: "/runner/_work",
+					MountPath: workDir,
+				},
+				{
+					Name:      "externals",
+					MountPath: "/runner/externals",
+				},
+				{
+					Name:      "certs-client",
+					MountPath: "/certs/client",
 				},
 			},
 			Env: []corev1.EnvVar{
 				{
 					Name:  "DOCKER_TLS_CERTDIR",
-					Value: "",
+					Value: "/certs",
 				},
 			},
 			SecurityContext: &corev1.SecurityContext{
